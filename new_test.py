@@ -51,7 +51,7 @@ compression_daemon = CompressionDaemon(
 )
 content_tagger = ContentTagger(api_key=GEMINI_API_KEY)
 
-@app.get("/process-folder")
+@app.get("/api/process-folder")
 async def process_folder():
     """Process all PDF files in the watched folder."""
     try:
@@ -149,7 +149,7 @@ async def process_folder():
         logger.error(f"Error processing folder: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/process-latest")
+@app.get("/api/process-latest")
 async def process_latest():
     """Process only the most recent PDF file in the watched folder."""
     try:
@@ -243,7 +243,7 @@ async def process_latest():
         logger.error(f"Error processing latest file: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/health")
+@app.get("/api/health")
 async def health_check():
     """Check the health of the service and its dependencies."""
     try:
@@ -270,7 +270,7 @@ async def health_check():
             "error": str(e)
         }
 
-@app.get("/generate-tags")
+@app.get("/api/generate-tags")
 async def generate_tags():
     """Generate tags for all processed documents that don't already have tags."""
     try:
@@ -285,7 +285,7 @@ async def generate_tags():
         logger.error(f"Error generating tags: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/retitle-latest")
+@app.get("/api/retitle-latest")
 async def retitle_latest():
     """Retitle the most recent document in the processed files database."""
     try:
@@ -295,7 +295,7 @@ async def retitle_latest():
         logger.error(f"Error retitling latest document: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/retitle-folder")
+@app.get("/api/retitle-folder")
 async def retitle_folder():
     """Retitle all documents in the processed files database."""
     try:
@@ -305,7 +305,7 @@ async def retitle_folder():
         logger.error(f"Error retitling all documents: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/reclassify-documents")
+@app.get("/api/reclassify-documents")
 async def reclassify_documents():
     """Reclassify all documents in the processed files database."""
     try:
