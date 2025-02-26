@@ -5,6 +5,7 @@ from typing import Dict, Any, Optional
 from pypdf import PdfReader
 import google.generativeai as genai
 from googleapiclient.http import MediaIoBaseDownload
+import json
 
 from connectors.google_drive import get_drive_service
 from utils.pdf_tools import extract_pdf_metadata
@@ -83,17 +84,25 @@ class DocumentProcessor:
         authors = await self._extract_authors(text_content)
         affiliations = await self._extract_affiliations(text_content)
         metadata = extract_pdf_metadata(pdf_path)
-
+        
+        # Extract title using AI prompt
+        extracted_title = await self._extract_title(text_content)
+        title = extracted_title or file['name']  # Fall back to file name if extraction fails
+        
+        # Classify document type
+        document_type = await self._classify_document(text_content)
+        
         result = {
             "id": file['id'],
+            "title": title,
+            "authors": authors,
             "name": file['name'],
             "drive_link": file.get('webViewLink', ''),
             "created_date": metadata['created_date'],
             "added_date": file.get('createdTime'),
             "processed_date": datetime.now().isoformat(),
-            "authors": authors,
             "affiliations": affiliations,
-            "title": metadata['title'] or file['name'],
+            "document_type": document_type,
             "summary": summary.text,
             "analysis": analysis.text
         }
@@ -153,4 +162,210 @@ Document text:
         
         response = self.model.generate_content(prompt.format(text_content=text_content[:2000]))
         affiliation_text = response.text.strip('"\'')
-        return list(dict.fromkeys([aff.strip() for aff in affiliation_text.split(',') if aff.strip()])) 
+        return list(dict.fromkeys([aff.strip() for aff in affiliation_text.split(',') if aff.strip()]))
+
+    def _clean_title(self, title: str) -> str:
+        """Clean and normalize a document title."""
+        if not title:
+            return ""
+        
+        # Remove quotes
+        title = title.strip('"\'')
+        
+        # Replace newlines and carriage returns with spaces
+        title = title.replace('\n', ' ').replace('\r', ' ')
+        
+        # Normalize whitespace (replace multiple spaces with single space)
+        import re
+        title = re.sub(r'\s+', ' ', title)
+        
+        # Final trim
+        return title.strip()
+
+    async def _extract_title(self, text_content: str) -> str:
+        """Extract document title using Gemini."""
+        prompt = """Extract the formal title of this document. Return ONLY the title as a single string, with no additional text, quotes, or formatting. If you cannot determine a clear title, extract what appears to be the main heading or subject.
+
+Document text:
+{text_content}"""
+        
+        try:
+            # Only use the first 1000 characters where titles typically appear
+            response = self.model.generate_content(prompt.format(text_content=text_content[:1000]))
+            title = self._clean_title(response.text)
+            return title
+        except Exception as e:
+            logger.error(f"Error extracting title: {str(e)}")
+            return ""
+
+    async def retitle_document(self, doc_id: str, doc_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Retitle a single document that has already been processed."""
+        try:
+            # Get the file from Google Drive
+            file = self.drive_service.files().get(fileId=doc_id, fields="id,name,webViewLink").execute()
+            
+            # Download the file
+            temp_path = f"temp/{doc_id}.pdf"
+            os.makedirs("temp", exist_ok=True)
+            
+            request = self.drive_service.files().get_media(fileId=doc_id)
+            with open(temp_path, 'wb') as f:
+                downloader = MediaIoBaseDownload(f, request)
+                done = False
+                while done is False:
+                    status, done = downloader.next_chunk()
+            
+            logger.info(f"Downloaded file to {temp_path} for retitling")
+            
+            # Extract text content
+            text_content = extract_text_from_pdf(temp_path)
+            
+            # Extract new title
+            new_title = await self._extract_title(text_content)
+            old_title = doc_data.get('title', '')
+            
+            # Update the document data
+            if new_title:
+                doc_data['title'] = new_title
+                logger.info(f"Updated title from '{old_title}' to '{new_title}'")
+            else:
+                logger.warning(f"Could not extract new title for {doc_id}, keeping existing title")
+            
+            # Clean up temp file
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+                logger.info(f"Cleaned up temp file: {temp_path}")
+                
+            return {
+                "id": doc_id,
+                "old_title": old_title,
+                "new_title": new_title if new_title else old_title,
+                "updated": bool(new_title)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error retitling document {doc_id}: {str(e)}")
+            return {
+                "id": doc_id,
+                "error": str(e)
+            }
+
+    async def retitle_latest_document(self) -> Dict[str, Any]:
+        """Retitle the most recent document in the processed files database."""
+        try:
+            if not os.path.exists('data/processed_files.json'):
+                return {"status": "error", "message": "No processed files database found"}
+            
+            with open('data/processed_files.json', 'r') as f:
+                documents = json.load(f)
+            
+            if not documents:
+                return {"status": "error", "message": "No documents found in database"}
+            
+            # Find the most recent document by processed_date
+            latest_doc_id = None
+            latest_date = None
+            
+            for doc_id, doc_data in documents.items():
+                processed_date = doc_data.get('processed_date')
+                if processed_date and (latest_date is None or processed_date > latest_date):
+                    latest_date = processed_date
+                    latest_doc_id = doc_id
+            
+            if not latest_doc_id:
+                return {"status": "error", "message": "Could not determine latest document"}
+            
+            # Retitle the document
+            result = await self.retitle_document(latest_doc_id, documents[latest_doc_id])
+            
+            # Save the updated database
+            with open('data/processed_files.json', 'w') as f:
+                json.dump(documents, f, indent=2)
+            
+            return {
+                "status": "success",
+                "document": result
+            }
+            
+        except Exception as e:
+            logger.error(f"Error retitling latest document: {str(e)}")
+            return {"status": "error", "message": str(e)}
+
+    async def retitle_all_documents(self) -> Dict[str, Any]:
+        """Retitle all documents in the processed files database."""
+        try:
+            if not os.path.exists('data/processed_files.json'):
+                return {"status": "error", "message": "No processed files database found"}
+            
+            with open('data/processed_files.json', 'r') as f:
+                documents = json.load(f)
+            
+            if not documents:
+                return {"status": "error", "message": "No documents found in database"}
+            
+            results = []
+            
+            # Process each document
+            for doc_id, doc_data in documents.items():
+                result = await self.retitle_document(doc_id, doc_data)
+                results.append(result)
+                
+                # Save after each update to avoid losing progress
+                with open('data/processed_files.json', 'w') as f:
+                    json.dump(documents, f, indent=2)
+            
+            return {
+                "status": "success",
+                "updated_count": sum(1 for r in results if r.get('updated', False)),
+                "total_count": len(results),
+                "results": results
+            }
+            
+        except Exception as e:
+            logger.error(f"Error retitling all documents: {str(e)}")
+            return {"status": "error", "message": str(e)}
+
+    async def _classify_document(self, text_content: str) -> str:
+        """Classify document into a specific document type category."""
+        prompt = """Classify this document into exactly ONE of the following categories based on its content, structure, and style:
+
+- academic-paper: Research papers, scholarly articles, conference proceedings
+- equity-research-report: Financial analysis, stock reports, investment research
+- article: News articles, magazine pieces, journalistic content
+- blog-post: Blog entries, opinion pieces, informal web content
+- book-chapter: Book excerpts, textbook sections, monograph chapters
+- presentation: Slide decks, talks, conference presentations
+- technical-report: White papers, industry reports, technical documentation
+- legal-document: Contracts, patents, legal filings, regulations
+- social-media: Tweets, social media posts, short-form content
+- other: Documents that don't fit other categories
+
+Return ONLY the category name as a single word or hyphenated phrase, with no additional text.
+
+Document text:
+{text_content}"""
+        
+        try:
+            # Use a representative sample of the document for classification
+            # We'll use more text than for title extraction but less than full document
+            sample_text = text_content[:5000]  # First 5000 chars should be enough for classification
+            response = self.model.generate_content(prompt.format(text_content=sample_text))
+            document_type = response.text.strip().lower()
+            
+            # Validate the response is one of our expected categories
+            valid_categories = [
+                'academic-paper', 'equity-research-report', 'article', 'blog-post', 
+                'book-chapter', 'presentation', 'technical-report', 'legal-document',
+                'social-media', 'other'
+            ]
+            
+            if document_type not in valid_categories:
+                logger.warning(f"Unexpected document type: {document_type}, defaulting to 'other'")
+                document_type = 'other'
+            
+            logger.info(f"Document classified as: {document_type}")
+            return document_type
+            
+        except Exception as e:
+            logger.error(f"Error classifying document: {str(e)}")
+            return "other"  # Default to 'other' if classification fails 

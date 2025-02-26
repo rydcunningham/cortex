@@ -9,7 +9,10 @@ import {
   Tr,
   Th,
   Td,
+  Spinner,
+  Heading,
 } from '@chakra-ui/react'
+import TagNetwork from './TagNetwork'
 
 // Mock data - matches structure from the Overclock project
 const mockData = [
@@ -40,7 +43,7 @@ export const ExplorePage = () => {
       >
         <Text color="cyber-text" textTransform="uppercase" fontSize="lg" fontFamily="heading">
           {view === 'table' && 'Document Table'}
-          {view === 'graph' && 'Document Graph'}
+          {view === 'graph' && 'Document Tag Network'}
           {view === 'connectome' && 'Document Connectome'}
         </Text>
       </Box>
@@ -88,10 +91,14 @@ export const ExplorePage = () => {
         <Box 
           {...panelStyle}
           p={6}
+          minHeight="700px"
         >
-          <Text color="cyber-text" fontSize="md">
-            Graph view coming soon
+          <Text color="cyber-text" fontSize="md" mb={4}>
+            This visualization shows relationships between tags in your document database.
+            Select a tag to explore its connections, or adjust the strength threshold to see 
+            different levels of tag relationships.
           </Text>
+          <TagNetwork />
         </Box>
       )}
       

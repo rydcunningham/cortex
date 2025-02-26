@@ -10,6 +10,7 @@ class ContentTagger:
     def __init__(self, api_key: str):
         """Initialize the content tagger with Gemini configuration."""
         self.configure_ai(api_key)
+        self.skipped_count = 0
         logger.info("Content tagger initialized")
 
     def configure_ai(self, api_key: str):
@@ -66,9 +67,15 @@ Content:
             logger.error(f"Error generating tags: {str(e)}")
             return []
 
-    async def process_all_documents(self) -> Dict[str, List[str]]:
-        """Process all documents in the processed files database."""
+    def _has_tags(self, doc: Dict[str, Any]) -> bool:
+        """Check if a document already has tags."""
+        return 'tags' in doc and isinstance(doc['tags'], list) and len(doc['tags']) > 0
+
+    async def process_all_documents(self, skip_tagged=False) -> Dict[str, List[str]]:
+        """Process all documents in the processed files database, with option to skip already tagged documents."""
         try:
+            self.skipped_count = 0  # Reset counter
+            
             if not os.path.exists('data/processed_files.json'):
                 logger.warning("No processed files database found")
                 return {}
@@ -79,6 +86,12 @@ Content:
             results = {}
             
             for doc_id, doc in documents.items():
+                # Skip if already tagged and skip_tagged is True
+                if skip_tagged and self._has_tags(doc):
+                    logger.info(f"Skipping already tagged document: {doc.get('name', 'Unknown')}")
+                    self.skipped_count += 1
+                    continue
+                    
                 tags = await self.process_document(doc)
                 if tags:
                     results[doc_id] = tags
@@ -91,7 +104,7 @@ Content:
                         json.dump(documents, f, indent=2)
                     logger.info(f"Updated tags for document {doc.get('name')}")
             
-            logger.info(f"Processed {len(results)} documents")
+            logger.info(f"Processed {len(results)} documents, skipped {self.skipped_count} documents")
             return results
 
         except Exception as e:

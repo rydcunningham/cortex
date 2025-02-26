@@ -1,7 +1,9 @@
 import os
 import logging
+import json
 from fastapi import FastAPI, HTTPException
 from dotenv import load_dotenv
+from googleapiclient.http import MediaIoBaseDownload
 
 from agents.document_processor import DocumentProcessor
 from daemons.compression_daemon import CompressionDaemon
@@ -14,6 +16,11 @@ logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
+
+# Load required environment variables
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+WATCH_FOLDER_ID = os.getenv('WATCH_FOLDER_ID')
+COMPRESSED_FOLDER_ID = os.getenv('COMPRESSED_FOLDER_ID')
 
 # Initialize FastAPI
 app = FastAPI(
@@ -40,7 +47,7 @@ for var_name, error_msg in required_vars:
 document_processor = DocumentProcessor(api_key=GEMINI_API_KEY)
 compression_daemon = CompressionDaemon(
     compression_level=int(os.getenv('COMPRESSION_LEVEL', '3')),
-    compressed_folder_id=os.getenv('COMPRESSED_FOLDER_ID')
+    compressed_folder_id=COMPRESSED_FOLDER_ID
 )
 content_tagger = ContentTagger(api_key=GEMINI_API_KEY)
 
@@ -265,16 +272,119 @@ async def health_check():
 
 @app.get("/generate-tags")
 async def generate_tags():
-    """Generate tags for all processed documents."""
+    """Generate tags for all processed documents that don't already have tags."""
     try:
-        results = await content_tagger.process_all_documents()
+        results = await content_tagger.process_all_documents(skip_tagged=True)
         return {
             "status": "success",
             "tagged_count": len(results),
+            "skipped_count": content_tagger.skipped_count,
             "results": results
         }
     except Exception as e:
         logger.error(f"Error generating tags: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/retitle-latest")
+async def retitle_latest():
+    """Retitle the most recent document in the processed files database."""
+    try:
+        result = await document_processor.retitle_latest_document()
+        return result
+    except Exception as e:
+        logger.error(f"Error retitling latest document: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/retitle-folder")
+async def retitle_folder():
+    """Retitle all documents in the processed files database."""
+    try:
+        result = await document_processor.retitle_all_documents()
+        return result
+    except Exception as e:
+        logger.error(f"Error retitling all documents: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/reclassify-documents")
+async def reclassify_documents():
+    """Reclassify all documents in the processed files database."""
+    try:
+        if not os.path.exists('data/processed_files.json'):
+            return {"status": "error", "message": "No processed files database found"}
+            
+        with open('data/processed_files.json', 'r') as f:
+            documents = json.load(f)
+            
+        if not documents:
+            return {"status": "error", "message": "No documents found in database"}
+            
+        results = []
+        updated_count = 0
+        
+        # Process each document
+        for doc_id, doc_data in documents.items():
+            # Get the file from Google Drive
+            try:
+                file = document_processor.drive_service.files().get(fileId=doc_id, fields="id,name").execute()
+                
+                # Download the file
+                temp_path = f"temp/{doc_id}.pdf"
+                os.makedirs("temp", exist_ok=True)
+                
+                request = document_processor.drive_service.files().get_media(fileId=doc_id)
+                with open(temp_path, 'wb') as f:
+                    downloader = MediaIoBaseDownload(f, request)
+                    done = False
+                    while done is False:
+                        status, done = downloader.next_chunk()
+                
+                # Extract text content
+                text_content = extract_text_from_pdf(temp_path)
+                
+                # Classify document
+                old_type = doc_data.get('document_type', 'unknown')
+                new_type = await document_processor._classify_document(text_content)
+                
+                # Update document data
+                doc_data['document_type'] = new_type
+                
+                result = {
+                    "id": doc_id,
+                    "name": doc_data.get('name', file['name']),
+                    "old_type": old_type,
+                    "new_type": new_type,
+                    "updated": old_type != new_type
+                }
+                
+                if old_type != new_type:
+                    updated_count += 1
+                
+                results.append(result)
+                
+                # Clean up temp file
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                
+                # Save after each update to avoid losing progress
+                with open('data/processed_files.json', 'w') as f:
+                    json.dump(documents, f, indent=2)
+                    
+            except Exception as e:
+                logger.error(f"Error reclassifying document {doc_id}: {str(e)}")
+                results.append({
+                    "id": doc_id,
+                    "error": str(e)
+                })
+                
+        return {
+            "status": "success",
+            "updated_count": updated_count,
+            "total_count": len(results),
+            "results": results
+        }
+        
+    except Exception as e:
+        logger.error(f"Error reclassifying documents: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
