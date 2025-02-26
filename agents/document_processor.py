@@ -327,7 +327,16 @@ Document text:
 
     async def _classify_document(self, text_content: str) -> str:
         """Classify document into a specific document type category."""
-        prompt = """Classify this document into exactly ONE of the following categories based on its content, structure, and style:
+        try:
+            if not text_content or not text_content.strip():
+                logger.warning("Empty text content provided for classification")
+                return "other"
+                
+            # Use a representative sample of the document for classification
+            # We'll use more text than for title extraction but less than full document
+            sample_text = text_content[:5000]  # First 5000 chars should be enough for classification
+            
+            prompt = """Classify this document into exactly ONE of the following categories based on its content, structure, and style:
 
 - academic-paper: Research papers, scholarly articles, conference proceedings
 - equity-research-report: Financial analysis, stock reports, investment research
@@ -344,11 +353,7 @@ Return ONLY the category name as a single word or hyphenated phrase, with no add
 
 Document text:
 {text_content}"""
-        
-        try:
-            # Use a representative sample of the document for classification
-            # We'll use more text than for title extraction but less than full document
-            sample_text = text_content[:5000]  # First 5000 chars should be enough for classification
+            
             response = self.model.generate_content(prompt.format(text_content=sample_text))
             document_type = response.text.strip().lower()
             
@@ -368,4 +373,83 @@ Document text:
             
         except Exception as e:
             logger.error(f"Error classifying document: {str(e)}")
-            return "other"  # Default to 'other' if classification fails 
+            return "other"  # Default to 'other' if classification fails
+
+    async def reclassify_all_documents(self) -> Dict[str, Any]:
+        """Reclassify all documents in the processed files database."""
+        try:
+            if not os.path.exists('data/processed_files.json'):
+                return {"status": "error", "message": "No processed files database found"}
+            
+            with open('data/processed_files.json', 'r') as f:
+                documents = json.load(f)
+            
+            if not documents:
+                return {"status": "error", "message": "No documents found in database"}
+            
+            results = []
+            updated_count = 0
+            
+            # Process each document
+            for doc_id, doc_data in documents.items():
+                try:
+                    # Get the file from Google Drive
+                    file = self.drive_service.files().get(fileId=doc_id, fields="id,name").execute()
+                    
+                    # Download and process the file
+                    temp_path = f"temp/{doc_id}.pdf"
+                    os.makedirs("temp", exist_ok=True)
+                    
+                    request = self.drive_service.files().get_media(fileId=doc_id)
+                    with open(temp_path, 'wb') as f:
+                        downloader = MediaIoBaseDownload(f, request)
+                        done = False
+                        while done is False:
+                            status, done = downloader.next_chunk()
+                    
+                    # Extract text and classify
+                    text_content = extract_text_from_pdf(temp_path)
+                    old_type = doc_data.get('document_type', 'unknown')
+                    new_type = await self._classify_document(text_content)
+                    
+                    # Update document data
+                    doc_data['document_type'] = new_type
+                    
+                    result = {
+                        "id": doc_id,
+                        "name": doc_data.get('name', file['name']),
+                        "old_type": old_type,
+                        "new_type": new_type,
+                        "updated": old_type != new_type
+                    }
+                    
+                    if old_type != new_type:
+                        updated_count += 1
+                    
+                    results.append(result)
+                    
+                    # Clean up temp file
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+                    
+                    # Save after each update
+                    with open('data/processed_files.json', 'w') as f:
+                        json.dump(documents, f, indent=2)
+                        
+                except Exception as e:
+                    logger.error(f"Error reclassifying document {doc_id}: {str(e)}")
+                    results.append({
+                        "id": doc_id,
+                        "error": str(e)
+                    })
+            
+            return {
+                "status": "success",
+                "updated_count": updated_count,
+                "total_count": len(results),
+                "results": results
+            }
+            
+        except Exception as e:
+            logger.error(f"Error reclassifying documents: {str(e)}")
+            return {"status": "error", "message": str(e)} 

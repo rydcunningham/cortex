@@ -309,80 +309,10 @@ async def retitle_folder():
 async def reclassify_documents():
     """Reclassify all documents in the processed files database."""
     try:
-        if not os.path.exists('data/processed_files.json'):
-            return {"status": "error", "message": "No processed files database found"}
-            
-        with open('data/processed_files.json', 'r') as f:
-            documents = json.load(f)
-            
-        if not documents:
-            return {"status": "error", "message": "No documents found in database"}
-            
-        results = []
-        updated_count = 0
-        
-        # Process each document
-        for doc_id, doc_data in documents.items():
-            # Get the file from Google Drive
-            try:
-                file = document_processor.drive_service.files().get(fileId=doc_id, fields="id,name").execute()
-                
-                # Download the file
-                temp_path = f"temp/{doc_id}.pdf"
-                os.makedirs("temp", exist_ok=True)
-                
-                request = document_processor.drive_service.files().get_media(fileId=doc_id)
-                with open(temp_path, 'wb') as f:
-                    downloader = MediaIoBaseDownload(f, request)
-                    done = False
-                    while done is False:
-                        status, done = downloader.next_chunk()
-                
-                # Extract text content
-                text_content = extract_text_from_pdf(temp_path)
-                
-                # Classify document
-                old_type = doc_data.get('document_type', 'unknown')
-                new_type = await document_processor._classify_document(text_content)
-                
-                # Update document data
-                doc_data['document_type'] = new_type
-                
-                result = {
-                    "id": doc_id,
-                    "name": doc_data.get('name', file['name']),
-                    "old_type": old_type,
-                    "new_type": new_type,
-                    "updated": old_type != new_type
-                }
-                
-                if old_type != new_type:
-                    updated_count += 1
-                
-                results.append(result)
-                
-                # Clean up temp file
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
-                
-                # Save after each update to avoid losing progress
-                with open('data/processed_files.json', 'w') as f:
-                    json.dump(documents, f, indent=2)
-                    
-            except Exception as e:
-                logger.error(f"Error reclassifying document {doc_id}: {str(e)}")
-                results.append({
-                    "id": doc_id,
-                    "error": str(e)
-                })
-                
-        return {
-            "status": "success",
-            "updated_count": updated_count,
-            "total_count": len(results),
-            "results": results
-        }
-        
+        result = await document_processor.reclassify_all_documents()
+        if result["status"] == "error":
+            raise HTTPException(status_code=500, detail=result["message"])
+        return result
     except Exception as e:
         logger.error(f"Error reclassifying documents: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
