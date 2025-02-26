@@ -9,6 +9,9 @@ export const Sidebar = () => {
   // Is the user on any explore page?
   const isExplore = currentPath.startsWith('/explore')
   
+  // Is the user on any entities page?
+  const isEntities = currentPath.startsWith('/entities')
+  
   // Button styling with grayscale theme
   const buttonStyle = {
     fontFamily: "mono",
@@ -72,40 +75,95 @@ export const Sidebar = () => {
           
           <Button
             as={Link}
-            to="/explore"
+            to="/explore/table"
             {...(isExplore ? activeButtonStyle : buttonStyle)}
           >
             EXPLORE
           </Button>
+          
+          <Button
+            as={Link}
+            to="/entities"
+            {...(isEntities ? activeButtonStyle : buttonStyle)}
+          >
+            ENTITIES
+          </Button>
         </VStack>
       </Box>
       
-      {/* Bottom section: Explore sub-menu (only shown when on explore pages) */}
+      {/* Explore sub-menu (only shown when on explore pages) */}
       {isExplore && (
         <Box py={3} px={2}>
           <VStack align="stretch" spacing={0}>
             <Button
               as={Link}
               to="/explore/table"
-              {...(currentPath === '/explore/table' ? activeButtonStyle : buttonStyle)}
+              {...(currentPath.includes('/explore/table') || currentPath.includes('/explore/documents') ? activeButtonStyle : buttonStyle)}
             >
-              TABLE
+              DOCUMENTS
             </Button>
             
             <Button
               as={Link}
               to="/explore/graph"
-              {...(currentPath === '/explore/graph' ? activeButtonStyle : buttonStyle)}
+              {...(currentPath.includes('/explore/graph') || currentPath.includes('/explore/topics') ? activeButtonStyle : buttonStyle)}
             >
-              GRAPH
+              TOPICS
+            </Button>
+            
+            <Button
+              as={Link}
+              to="/explore/entities"
+              {...(currentPath.includes('/explore/entities') ? activeButtonStyle : buttonStyle)}
+            >
+              ENTITIES
             </Button>
             
             <Button
               as={Link}
               to="/explore/connectome"
-              {...(currentPath === '/explore/connectome' ? activeButtonStyle : buttonStyle)}
+              {...(currentPath.includes('/explore/connectome') ? activeButtonStyle : buttonStyle)}
             >
               CONNECTOME
+            </Button>
+          </VStack>
+        </Box>
+      )}
+      
+      {/* Entities sub-menu (only shown when on entities pages) */}
+      {isEntities && (
+        <Box py={3} px={2}>
+          <VStack align="stretch" spacing={0}>
+            <Button
+              as={Link}
+              to="/entities/companies"
+              {...(currentPath === '/entities/companies' ? activeButtonStyle : buttonStyle)}
+            >
+              COMPANIES
+            </Button>
+            
+            <Button
+              as={Link}
+              to="/entities/organizations"
+              {...(currentPath === '/entities/organizations' ? activeButtonStyle : buttonStyle)}
+            >
+              ORGANIZATIONS
+            </Button>
+            
+            <Button
+              as={Link}
+              to="/entities/people"
+              {...(currentPath === '/entities/people' ? activeButtonStyle : buttonStyle)}
+            >
+              PEOPLE
+            </Button>
+            
+            <Button
+              as={Link}
+              to="/entities/add"
+              {...(currentPath === '/entities/add' ? activeButtonStyle : buttonStyle)}
+            >
+              ADD ENTITY
             </Button>
           </VStack>
         </Box>
