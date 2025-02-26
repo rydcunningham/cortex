@@ -23,10 +23,11 @@ const API_ENDPOINTS = {
   generateTags: '/api/generate-tags',
   retitleLatest: '/api/retitle-latest',
   retitleFolder: '/api/retitle-folder',
-  reclassifyDocuments: '/api/reclassify-documents'
+  reclassifyDocuments: '/api/reclassify-documents',
+  extractEntities: '/api/extract-entities'
 }
 
-type OperationType = 'processLatest' | 'processFolder' | 'generateTags' | 'retitleLatest' | 'retitleFolder' | 'reclassifyDocuments' | null;
+type OperationType = 'processLatest' | 'processFolder' | 'generateTags' | 'retitleLatest' | 'retitleFolder' | 'reclassifyDocuments' | 'extractEntities' | null;
 
 export const Commit = () => {
   const toast = useToast();
@@ -37,7 +38,8 @@ export const Commit = () => {
     generateTags: [],
     retitleLatest: [],
     retitleFolder: [],
-    reclassifyDocuments: []
+    reclassifyDocuments: [],
+    extractEntities: []
   });
   const [isLoading, setIsLoading] = useState<Record<string, boolean>>({
     processLatest: false,
@@ -45,7 +47,8 @@ export const Commit = () => {
     generateTags: false,
     retitleLatest: false,
     retitleFolder: false,
-    reclassifyDocuments: false
+    reclassifyDocuments: false,
+    extractEntities: false
   });
   
   // Panel styling with grayscale theme
@@ -237,6 +240,16 @@ export const Commit = () => {
             height="50px"
           >
             Reclassify Documents
+          </Button>
+
+          <Button 
+            onClick={() => makeApiCall('extractEntities')} 
+            isLoading={isLoading.extractEntities}
+            colorScheme="green"
+            variant="outline"
+            height="50px"
+          >
+            Extract Entities
           </Button>
         </SimpleGrid>
       </Box>

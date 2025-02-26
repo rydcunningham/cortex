@@ -9,6 +9,7 @@ from agents.document_processor import DocumentProcessor
 from daemons.compression_daemon import CompressionDaemon
 from connectors.google_drive import get_drive_service
 from agents.content_tagger import ContentTagger
+from daemons.entity_processor import EntityProcessor
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -315,6 +316,30 @@ async def reclassify_documents():
         return result
     except Exception as e:
         logger.error(f"Error reclassifying documents: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/extract-entities")
+async def extract_entities():
+    """Extract entities from all processed documents."""
+    try:
+        processor = EntityProcessor()
+        processor.process_documents()
+        
+        # Count the number of entities extracted
+        entity_count = len(processor.db.entities)
+        
+        return {
+            "status": "success",
+            "message": "Entities extracted and saved successfully",
+            "entities_file": str(processor.entities_file),
+            "entity_count": entity_count,
+            "types": {
+                "person": len([e for e in processor.db.entities.values() if e.type == "person"]),
+                "organization": len([e for e in processor.db.entities.values() if e.type == "organization"])
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error extracting entities: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
