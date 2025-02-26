@@ -113,14 +113,6 @@ export const Sidebar = () => {
             
             <Button
               as={Link}
-              to="/explore/entities"
-              {...(currentPath.includes('/explore/entities') ? activeButtonStyle : buttonStyle)}
-            >
-              ENTITIES
-            </Button>
-            
-            <Button
-              as={Link}
               to="/explore/connectome"
               {...(currentPath.includes('/explore/connectome') ? activeButtonStyle : buttonStyle)}
             >

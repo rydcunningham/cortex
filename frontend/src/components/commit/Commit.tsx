@@ -15,6 +15,7 @@ import {
   SimpleGrid,
 } from '@chakra-ui/react'
 import { callApi } from '../../utils/api'
+import { Panel } from '../common/Panel'
 
 // API endpoints
 const API_ENDPOINTS = {
@@ -23,11 +24,10 @@ const API_ENDPOINTS = {
   generateTags: '/api/generate-tags',
   retitleLatest: '/api/retitle-latest',
   retitleFolder: '/api/retitle-folder',
-  reclassifyDocuments: '/api/reclassify-documents',
-  extractEntities: '/api/extract-entities'
+  reclassifyDocuments: '/api/reclassify-documents'
 }
 
-type OperationType = 'processLatest' | 'processFolder' | 'generateTags' | 'retitleLatest' | 'retitleFolder' | 'reclassifyDocuments' | 'extractEntities' | null;
+type OperationType = 'processLatest' | 'processFolder' | 'generateTags' | 'retitleLatest' | 'retitleFolder' | 'reclassifyDocuments' | null;
 
 export const Commit = () => {
   const toast = useToast();
@@ -38,8 +38,7 @@ export const Commit = () => {
     generateTags: [],
     retitleLatest: [],
     retitleFolder: [],
-    reclassifyDocuments: [],
-    extractEntities: []
+    reclassifyDocuments: []
   });
   const [isLoading, setIsLoading] = useState<Record<string, boolean>>({
     processLatest: false,
@@ -47,18 +46,8 @@ export const Commit = () => {
     generateTags: false,
     retitleLatest: false,
     retitleFolder: false,
-    reclassifyDocuments: false,
-    extractEntities: false
+    reclassifyDocuments: false
   });
-  
-  // Panel styling with grayscale theme
-  const panelStyle = {
-    bg: "#F0F0F0",
-    borderRadius: "4px",
-    border: "1px",
-    borderColor: "rgba(100, 100, 100, 0.2)",
-    p: 4,
-  }
   
   // Function to simulate log streaming
   const simulateLogStreaming = (operation: OperationType, startMessage: string) => {
@@ -169,12 +158,11 @@ export const Commit = () => {
   }
   
   return (
-    <Box p={6} bg="#FAFAFA">
+    <Box p={4} bg="#FAFAFA">
       <Heading size="lg" mb={6}>Knowledge Processor</Heading>
       
       {/* Document Processing Operations */}
-      <Box {...panelStyle} mb={6}>
-        <Text fontWeight="bold" mb={4}>Document Processing</Text>
+      <Panel title="DOCUMENT PROCESSING" mb={6} height="auto">
         <SimpleGrid columns={[1, 2]} spacing={4}>
           <Button 
             onClick={() => makeApiCall('processLatest')} 
@@ -196,11 +184,10 @@ export const Commit = () => {
             Process Entire Folder
           </Button>
         </SimpleGrid>
-      </Box>
+      </Panel>
       
       {/* Metadata Enhancement Operations */}
-      <Box {...panelStyle} mb={6}>
-        <Text fontWeight="bold" mb={4}>Metadata Enhancement</Text>
+      <Panel title="METADATA ENHANCEMENT" mb={6} height="auto">
         <SimpleGrid columns={[1, 2, 3]} spacing={4}>
           <Button 
             onClick={() => makeApiCall('generateTags')} 
@@ -241,23 +228,12 @@ export const Commit = () => {
           >
             Reclassify Documents
           </Button>
-
-          <Button 
-            onClick={() => makeApiCall('extractEntities')} 
-            isLoading={isLoading.extractEntities}
-            colorScheme="green"
-            variant="outline"
-            height="50px"
-          >
-            Extract Entities
-          </Button>
         </SimpleGrid>
-      </Box>
+      </Panel>
       
       {/* Log Panel */}
-      <Box {...panelStyle}>
-        <Flex justify="space-between" align="center" mb={4}>
-          <Text fontWeight="bold">Operation Logs</Text>
+      <Panel title="OPERATION LOGS" height="500px">
+        <Flex justify="flex-end" mb={4}>
           {currentOperation && (
             <Badge colorScheme={isLoading[currentOperation] ? 'orange' : 'green'}>
               {isLoading[currentOperation] ? 'Running' : 'Completed'}: {formatOperationName(currentOperation)}
@@ -272,7 +248,7 @@ export const Commit = () => {
             bg="#FFFFFF" 
             p={4} 
             borderRadius="md" 
-            height="400px" 
+            height="350px" 
             overflowY="auto"
             fontFamily="monospace"
             fontSize="sm"
@@ -313,7 +289,7 @@ export const Commit = () => {
             bg="#FFFFFF" 
             p={4} 
             borderRadius="md" 
-            height="400px"
+            height="350px"
             display="flex"
             alignItems="center"
             justifyContent="center"
@@ -321,7 +297,7 @@ export const Commit = () => {
             <Text color="gray.500">Select an operation to see logs</Text>
           </Box>
         )}
-      </Box>
+      </Panel>
     </Box>
   )
 } 
