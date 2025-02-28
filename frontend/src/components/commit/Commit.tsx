@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { 
   Box, 
   Text,
@@ -13,6 +13,15 @@ import {
   Divider,
   Badge,
   SimpleGrid,
+  Checkbox,
+  Stack,
+  Card,
+  CardBody,
+  CardHeader,
+  Tooltip,
+  IconButton,
+  useColorModeValue,
+  Skeleton
 } from '@chakra-ui/react'
 import { callApi } from '../../utils/api'
 import { Panel } from '../common/Panel'
@@ -24,10 +33,20 @@ const API_ENDPOINTS = {
   generateTags: '/api/generate-tags',
   retitleLatest: '/api/retitle-latest',
   retitleFolder: '/api/retitle-folder',
-  reclassifyDocuments: '/api/reclassify-documents'
+  reclassifyDocuments: '/api/reclassify-documents',
+  getLatestDriveFile: '/api/get-latest-drive-file',
+  getUnprocessedFiles: '/api/get-unprocessed-files'
 }
 
 type OperationType = 'processLatest' | 'processFolder' | 'generateTags' | 'retitleLatest' | 'retitleFolder' | 'reclassifyDocuments' | null;
+
+type DriveFile = {
+  id: string;
+  name: string;
+  title?: string;
+  createdTime: string;
+  webViewLink?: string;
+};
 
 export const Commit = () => {
   const toast = useToast();
@@ -48,6 +67,71 @@ export const Commit = () => {
     retitleFolder: false,
     reclassifyDocuments: false
   });
+  const [processEntireFolder, setProcessEntireFolder] = useState(false);
+  const [latestFile, setLatestFile] = useState<DriveFile | null>(null);
+  const [unprocessedFiles, setUnprocessedFiles] = useState<DriveFile[]>([]);
+  const [isLoadingFiles, setIsLoadingFiles] = useState({
+    latest: false,
+    unprocessed: false
+  });
+  
+  // Function to fetch latest file from Google Drive
+  const fetchLatestFile = async () => {
+    try {
+      setIsLoadingFiles(prev => ({ ...prev, latest: true }));
+      const response = await callApi(API_ENDPOINTS.getLatestDriveFile);
+      if (response && response.file) {
+        setLatestFile(response.file);
+      }
+    } catch (error) {
+      console.error("Error fetching latest file:", error);
+      toast({
+        title: 'Error',
+        description: 'Failed to fetch latest file from Google Drive',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      });
+    } finally {
+      setIsLoadingFiles(prev => ({ ...prev, latest: false }));
+    }
+  };
+  
+  // Function to fetch unprocessed files
+  const fetchUnprocessedFiles = async () => {
+    try {
+      setIsLoadingFiles(prev => ({ ...prev, unprocessed: true }));
+      const response = await callApi(API_ENDPOINTS.getUnprocessedFiles);
+      if (response && response.files) {
+        setUnprocessedFiles(response.files);
+      }
+    } catch (error) {
+      console.error("Error fetching unprocessed files:", error);
+      toast({
+        title: 'Error',
+        description: 'Failed to fetch unprocessed files',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      });
+    } finally {
+      setIsLoadingFiles(prev => ({ ...prev, unprocessed: false }));
+    }
+  };
+  
+  // Fetch files on component mount
+  useEffect(() => {
+    fetchLatestFile();
+    fetchUnprocessedFiles();
+    
+    // Refresh data every 30 seconds
+    const intervalId = setInterval(() => {
+      fetchLatestFile();
+      fetchUnprocessedFiles();
+    }, 30000);
+    
+    return () => clearInterval(intervalId);
+  }, []);
   
   // Function to simulate log streaming
   const simulateLogStreaming = (operation: OperationType, startMessage: string) => {
@@ -89,6 +173,12 @@ export const Commit = () => {
       ...prev,
       [operation]: false
     }));
+    
+    // Refresh file lists after processing
+    if (operation === 'processLatest' || operation === 'processFolder') {
+      fetchLatestFile();
+      fetchUnprocessedFiles();
+    }
   }
   
   // Function to handle API errors
@@ -150,6 +240,12 @@ export const Commit = () => {
     }
   }
   
+  // Function to process documents
+  const processDocuments = () => {
+    const operation = processEntireFolder ? 'processFolder' : 'processLatest';
+    makeApiCall(operation);
+  }
+  
   // Function to format operation name for display
   const formatOperationName = (operation: string) => {
     return operation
@@ -157,33 +253,139 @@ export const Commit = () => {
       .replace(/^./, str => str.toUpperCase());
   }
   
+  // Format date for display
+  const formatDate = (dateString: string) => {
+    if (!dateString) return 'Unknown';
+    const date = new Date(dateString);
+    return date.toLocaleString();
+  }
+  
+  // Card background color
+  const cardBg = useColorModeValue('white', 'gray.700');
+  
   return (
     <Box p={4} bg="#FAFAFA">
       <Heading size="lg" mb={6}>Knowledge Processor</Heading>
       
       {/* Document Processing Operations */}
       <Panel title="DOCUMENT PROCESSING" mb={6} height="auto">
-        <SimpleGrid columns={[1, 2]} spacing={4}>
-          <Button 
-            onClick={() => makeApiCall('processLatest')} 
-            isLoading={isLoading.processLatest}
-            colorScheme="blue"
-            variant="outline"
-            height="50px"
-          >
-            Process Latest Document
-          </Button>
+        <Flex direction="column" w="100%">
+          {/* Process controls */}
+          <Flex justify="space-between" align="center" mb={4}>
+            <Checkbox 
+              isChecked={processEntireFolder} 
+              onChange={(e) => setProcessEntireFolder(e.target.checked)}
+              colorScheme="gray"
+            >
+              Process entire folder
+            </Checkbox>
+            
+            <Button 
+              onClick={processDocuments} 
+              isLoading={isLoading.processLatest || isLoading.processFolder}
+              colorScheme="gray"
+              size="md"
+            >
+              {processEntireFolder ? 'Process All Documents' : 'Process Latest Document'}
+            </Button>
+          </Flex>
           
-          <Button 
-            onClick={() => makeApiCall('processFolder')} 
-            isLoading={isLoading.processFolder}
-            colorScheme="purple"
-            variant="outline"
-            height="50px"
-          >
-            Process Entire Folder
-          </Button>
-        </SimpleGrid>
+          <Divider mb={4} />
+          
+          {/* Document info boxes */}
+          <SimpleGrid columns={[1, null, 2]} spacing={4}>
+            {/* Latest file box */}
+            <Card variant="outline" bg={cardBg}>
+              <CardHeader pb={0}>
+                <Flex justify="space-between" align="center">
+                  <Heading size="sm">Latest Document in Drive</Heading>
+                  <Tooltip label="Refresh">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      isLoading={isLoadingFiles.latest}
+                      onClick={fetchLatestFile}
+                    >
+                      Refresh
+                    </Button>
+                  </Tooltip>
+                </Flex>
+              </CardHeader>
+              <CardBody>
+                {isLoadingFiles.latest ? (
+                  <VStack align="stretch" spacing={2}>
+                    <Skeleton height="20px" />
+                    <Skeleton height="20px" />
+                    <Skeleton height="20px" />
+                  </VStack>
+                ) : latestFile ? (
+                  <VStack align="stretch" spacing={1}>
+                    <Text fontWeight="bold" noOfLines={2}>
+                      {latestFile.title || latestFile.name}
+                    </Text>
+                    <Text fontSize="sm" color="gray.500">
+                      Added: {formatDate(latestFile.createdTime)}
+                    </Text>
+                    {latestFile.webViewLink && (
+                      <Text fontSize="sm">
+                        <a href={latestFile.webViewLink} target="_blank" rel="noopener noreferrer" style={{ color: 'blue' }}>
+                          View in Drive
+                        </a>
+                      </Text>
+                    )}
+                  </VStack>
+                ) : (
+                  <Text color="gray.500">No documents found in Drive</Text>
+                )}
+              </CardBody>
+            </Card>
+            
+            {/* Unprocessed files box */}
+            <Card variant="outline" bg={cardBg}>
+              <CardHeader pb={0}>
+                <Flex justify="space-between" align="center">
+                  <Heading size="sm">Unprocessed Documents</Heading>
+                  <Tooltip label="Refresh">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      isLoading={isLoadingFiles.unprocessed}
+                      onClick={fetchUnprocessedFiles}
+                    >
+                      Refresh
+                    </Button>
+                  </Tooltip>
+                </Flex>
+              </CardHeader>
+              <CardBody>
+                {isLoadingFiles.unprocessed ? (
+                  <VStack align="stretch" spacing={2}>
+                    <Skeleton height="20px" />
+                    <Skeleton height="20px" />
+                    <Skeleton height="20px" />
+                  </VStack>
+                ) : unprocessedFiles.length > 0 ? (
+                  <Box maxH="200px" overflowY="auto">
+                    <VStack align="stretch" spacing={3} divider={<Divider />}>
+                      {unprocessedFiles.map(file => (
+                        <Box key={file.id}>
+                          <Text fontWeight="bold" fontSize="sm" noOfLines={1}>
+                            {file.name}
+                          </Text>
+                          <Text fontSize="xs" color="gray.500">
+                            Added: {formatDate(file.createdTime)}
+                          </Text>
+                        </Box>
+                      ))}
+                    </VStack>
+                  </Box>
+                ) : (
+                  <Text color="gray.500">All documents have been processed</Text>
+                )}
+              </CardBody>
+            </Card>
+          </SimpleGrid>
+        </Flex>
       </Panel>
       
       {/* Metadata Enhancement Operations */}

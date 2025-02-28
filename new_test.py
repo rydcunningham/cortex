@@ -7,7 +7,7 @@ from googleapiclient.http import MediaIoBaseDownload
 
 from agents.document_processor import DocumentProcessor
 from daemons.compression_daemon import CompressionDaemon
-from connectors.google_drive import get_drive_service
+import connectors.google_drive as gd
 from agents.content_tagger import ContentTagger
 
 # Setup logging
@@ -55,7 +55,7 @@ content_tagger = ContentTagger(api_key=GEMINI_API_KEY)
 async def process_folder():
     """Process all PDF files in the watched folder."""
     try:
-        service = get_drive_service()
+        service = gd.get_drive_service()
         logger.info("Connected to Drive service")
         
         # List all files in the folder
@@ -153,7 +153,7 @@ async def process_folder():
 async def process_latest():
     """Process only the most recent PDF file in the watched folder."""
     try:
-        service = get_drive_service()
+        service = gd.get_drive_service()
         logger.info("Connected to Drive service")
         
         # List files in the folder, ordered by most recent first
@@ -248,7 +248,7 @@ async def health_check():
     """Check the health of the service and its dependencies."""
     try:
         # Check Drive service
-        service = get_drive_service()
+        service = gd.get_drive_service()
         service.files().list(pageSize=1).execute()
         
         # Check Ghostscript
@@ -315,6 +315,39 @@ async def reclassify_documents():
         return result
     except Exception as e:
         logger.error(f"Error reclassifying documents: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/get-latest-drive-file")
+async def get_latest_drive_file():
+    """Get the most recent file from the watched folder."""
+    try:
+        file = gd.get_latest_file(WATCH_FOLDER_ID)
+        if not file:
+            return {"status": "success", "message": "No files found", "file": None}
+            
+        return {
+            "status": "success",
+            "file": file
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting latest file: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/get-unprocessed-files")
+async def get_unprocessed_files():
+    """Get files from the watched folder that haven't been processed yet."""
+    try:
+        files = gd.get_unprocessed_files(WATCH_FOLDER_ID)
+        
+        return {
+            "status": "success",
+            "count": len(files),
+            "files": files
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting unprocessed files: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

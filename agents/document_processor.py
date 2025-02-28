@@ -10,7 +10,13 @@ import json
 from connectors.google_drive import get_drive_service
 from utils.pdf_tools import extract_pdf_metadata
 from utils.text_extraction import extract_text_from_pdf
-from utils.metadata_helpers import save_to_json, is_file_processed
+from utils.db_operations import (
+    save_document_to_db, 
+    is_document_in_db, 
+    get_document_from_db,
+    get_latest_document_id,
+    get_all_document_ids
+)
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -45,7 +51,7 @@ class DocumentProcessor:
             logger.info(f"Downloaded file to {temp_path}")
 
             # Check if already processed
-            if is_file_processed(file['id']):
+            if is_document_in_db(file['id']):
                 logger.info(f"File {file['name']} already processed, skipping analysis")
                 return {
                     "status": "skipped",
@@ -92,6 +98,9 @@ class DocumentProcessor:
         # Classify document type
         document_type = await self._classify_document(text_content)
         
+        # Generate tags
+        tags = await self._generate_tags(analysis.text)
+        
         result = {
             "id": file['id'],
             "title": title,
@@ -104,11 +113,12 @@ class DocumentProcessor:
             "affiliations": affiliations,
             "document_type": document_type,
             "summary": summary.text,
-            "analysis": analysis.text
+            "analysis": analysis.text,
+            "tags": tags
         }
 
         # Save to database
-        save_to_json(result)
+        save_document_to_db(result)
         return result
 
     async def _generate_analysis(self, text_content: str):
@@ -164,6 +174,23 @@ Document text:
         affiliation_text = response.text.strip('"\'')
         return list(dict.fromkeys([aff.strip() for aff in affiliation_text.split(',') if aff.strip()]))
 
+    async def _generate_tags(self, analysis: str):
+        """Generate tags from document analysis."""
+        prompt = """Based on the document analysis, generate 10-20 specific, hyphenated keyword tags that accurately represent the key concepts, technologies, and applications discussed.
+
+Format the tags as a comma-separated list of lowercase, hyphenated terms (e.g., machine-learning, neural-networks).
+
+Analysis:
+{analysis}"""
+        
+        try:
+            response = self.model.generate_content(prompt.format(analysis=analysis))
+            tag_text = response.text.strip('"\'')
+            return [tag.strip() for tag in tag_text.split(',') if tag.strip()]
+        except Exception as e:
+            logger.error(f"Error generating tags: {str(e)}")
+            return []
+
     def _clean_title(self, title: str) -> str:
         """Clean and normalize a document title."""
         if not title:
@@ -198,9 +225,14 @@ Document text:
             logger.error(f"Error extracting title: {str(e)}")
             return ""
 
-    async def retitle_document(self, doc_id: str, doc_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def retitle_document(self, doc_id: str) -> Dict[str, Any]:
         """Retitle a single document that has already been processed."""
         try:
+            # Get the document from database
+            doc_data = get_document_from_db(doc_id)
+            if not doc_data:
+                return {"status": "error", "message": f"Document {doc_id} not found in database"}
+            
             # Get the file from Google Drive
             file = self.drive_service.files().get(fileId=doc_id, fields="id,name,webViewLink").execute()
             
@@ -228,6 +260,9 @@ Document text:
             if new_title:
                 doc_data['title'] = new_title
                 logger.info(f"Updated title from '{old_title}' to '{new_title}'")
+                
+                # Save updated document to database
+                save_document_to_db(doc_data)
             else:
                 logger.warning(f"Could not extract new title for {doc_id}, keeping existing title")
             
@@ -251,36 +286,16 @@ Document text:
             }
 
     async def retitle_latest_document(self) -> Dict[str, Any]:
-        """Retitle the most recent document in the processed files database."""
+        """Retitle the most recent document in the database."""
         try:
-            if not os.path.exists('data/processed_files.json'):
-                return {"status": "error", "message": "No processed files database found"}
-            
-            with open('data/processed_files.json', 'r') as f:
-                documents = json.load(f)
-            
-            if not documents:
-                return {"status": "error", "message": "No documents found in database"}
-            
-            # Find the most recent document by processed_date
-            latest_doc_id = None
-            latest_date = None
-            
-            for doc_id, doc_data in documents.items():
-                processed_date = doc_data.get('processed_date')
-                if processed_date and (latest_date is None or processed_date > latest_date):
-                    latest_date = processed_date
-                    latest_doc_id = doc_id
+            # Get the latest document ID
+            latest_doc_id = get_latest_document_id()
             
             if not latest_doc_id:
-                return {"status": "error", "message": "Could not determine latest document"}
+                return {"status": "error", "message": "No documents found in database"}
             
             # Retitle the document
-            result = await self.retitle_document(latest_doc_id, documents[latest_doc_id])
-            
-            # Save the updated database
-            with open('data/processed_files.json', 'w') as f:
-                json.dump(documents, f, indent=2)
+            result = await self.retitle_document(latest_doc_id)
             
             return {
                 "status": "success",
@@ -292,27 +307,20 @@ Document text:
             return {"status": "error", "message": str(e)}
 
     async def retitle_all_documents(self) -> Dict[str, Any]:
-        """Retitle all documents in the processed files database."""
+        """Retitle all documents in the database."""
         try:
-            if not os.path.exists('data/processed_files.json'):
-                return {"status": "error", "message": "No processed files database found"}
+            # Get all document IDs
+            doc_ids = get_all_document_ids()
             
-            with open('data/processed_files.json', 'r') as f:
-                documents = json.load(f)
-            
-            if not documents:
+            if not doc_ids:
                 return {"status": "error", "message": "No documents found in database"}
             
             results = []
             
             # Process each document
-            for doc_id, doc_data in documents.items():
-                result = await self.retitle_document(doc_id, doc_data)
+            for doc_id in doc_ids:
+                result = await self.retitle_document(doc_id)
                 results.append(result)
-                
-                # Save after each update to avoid losing progress
-                with open('data/processed_files.json', 'w') as f:
-                    json.dump(documents, f, indent=2)
             
             return {
                 "status": "success",
@@ -376,23 +384,29 @@ Document text:
             return "other"  # Default to 'other' if classification fails
 
     async def reclassify_all_documents(self) -> Dict[str, Any]:
-        """Reclassify all documents in the processed files database."""
+        """Reclassify all documents in the database."""
         try:
-            if not os.path.exists('data/processed_files.json'):
-                return {"status": "error", "message": "No processed files database found"}
+            # Get all document IDs
+            doc_ids = get_all_document_ids()
             
-            with open('data/processed_files.json', 'r') as f:
-                documents = json.load(f)
-            
-            if not documents:
+            if not doc_ids:
                 return {"status": "error", "message": "No documents found in database"}
             
             results = []
             updated_count = 0
             
             # Process each document
-            for doc_id, doc_data in documents.items():
+            for doc_id in doc_ids:
                 try:
+                    # Get document from database
+                    doc_data = get_document_from_db(doc_id)
+                    if not doc_data:
+                        results.append({
+                            "id": doc_id,
+                            "error": "Document not found in database"
+                        })
+                        continue
+                    
                     # Get the file from Google Drive
                     file = self.drive_service.files().get(fileId=doc_id, fields="id,name").execute()
                     
@@ -415,6 +429,11 @@ Document text:
                     # Update document data
                     doc_data['document_type'] = new_type
                     
+                    # Save updated document to database
+                    if old_type != new_type:
+                        save_document_to_db(doc_data)
+                        updated_count += 1
+                    
                     result = {
                         "id": doc_id,
                         "name": doc_data.get('name', file['name']),
@@ -423,18 +442,11 @@ Document text:
                         "updated": old_type != new_type
                     }
                     
-                    if old_type != new_type:
-                        updated_count += 1
-                    
                     results.append(result)
                     
                     # Clean up temp file
                     if os.path.exists(temp_path):
                         os.remove(temp_path)
-                    
-                    # Save after each update
-                    with open('data/processed_files.json', 'w') as f:
-                        json.dump(documents, f, indent=2)
                         
                 except Exception as e:
                     logger.error(f"Error reclassifying document {doc_id}: {str(e)}")
